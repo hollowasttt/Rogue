@@ -1,115 +1,116 @@
--- Rogue procedural open-world map generator
--- Generates a large alien wilderness using Roblox Terrain.
+-- Rogue vertical open-world map generator
+-- 1024x1024 terrain with aggressive elevation changes for fast traversal.
 
 local Terrain = workspace.Terrain
+local Workspace = game:GetService("Workspace")
 
-local MAP_SIZE = 1536
-local CELL_SIZE = 24
-local MAX_HEIGHT = 180
+local MAP_SIZE = 1024
+local CELL_SIZE = 16
+local MIN_HEIGHT = 8
+local MAX_HEIGHT = 230
 local SEED = 84721
 
 local rng = Random.new(SEED)
 
-local function clamp01(value: number): number
-	return math.clamp(value, 0, 1)
+local generated = Workspace:FindFirstChild("RogueGenerated")
+if generated then
+	generated:Destroy()
 end
 
-local function fbm(x: number, z: number): number
+generated = Instance.new("Folder")
+generated.Name = "RogueGenerated"
+generated.Parent = Workspace
+
+local function fbm(x: number, z: number, seedOffset: number?): number
 	local value = 0
 	local amplitude = 1
 	local frequency = 1
-	local totalAmplitude = 0
+	local total = 0
+	local offset = seedOffset or 0
 
 	for _ = 1, 5 do
-		value += math.noise(x * frequency, z * frequency, SEED) * amplitude
-		totalAmplitude += amplitude
+		value += math.noise(x * frequency, z * frequency, SEED + offset) * amplitude
+		total += amplitude
 		amplitude *= 0.5
 		frequency *= 2
 	end
 
-	return value / totalAmplitude
+	return value / total
 end
 
 local function getHeight(x: number, z: number): number
 	local nx = x / MAP_SIZE
 	local nz = z / MAP_SIZE
 
-	-- Broad continental terrain.
-	local broad = fbm(nx * 2.2, nz * 2.2)
-	local detail = fbm(nx * 7, nz * 7) * 0.22
+	-- Large-scale landmass keeps the map readable.
+	local continent = fbm(nx * 2.5, nz * 2.5, 0)
+	local detail = fbm(nx * 10, nz * 10, 30) * 10
 
-	-- Several elevated mountain bands.
-	local ridgeA = math.max(0, math.noise(nx * 2.8 + 20, nz * 2.8 + 20, SEED + 11))
-	local ridgeB = math.max(0, math.noise(nx * 4.2 - 30, nz * 4.2 + 15, SEED + 29))
-	local mountains = (ridgeA ^ 2.2) * 95 + (ridgeB ^ 3) * 55
+	-- Long mountain chains create ridges rather than isolated hills.
+	local chain1 = math.abs(math.noise(nx * 2.7 + 4, nz * 1.3 - 8, SEED + 50))
+	local chain2 = math.abs(math.noise(nx * 1.5 - 14, nz * 3.4 + 11, SEED + 80))
+	local ridge = math.max(chain1, chain2)
 
-	local height = 45 + broad * 55 + detail * 30 + mountains
-	return math.clamp(height, 8, MAX_HEIGHT)
+	-- Sharpen ridges into steep faces.
+	local mountains = math.max(0, ridge - 0.30) ^ 1.7 * 260
+
+	-- A broad central valley prevents the whole map becoming mountainous.
+	local centralDistance = math.sqrt(nx * nx + nz * nz)
+	local valley = math.max(0, 1 - centralDistance * 3.0) * 38
+
+	local height = 48 + continent * 38 + detail + mountains - valley
+	return math.clamp(height, MIN_HEIGHT, MAX_HEIGHT)
 end
 
 local function biomeAt(x: number, z: number, height: number): string
-	local moisture = fbm(x / MAP_SIZE * 5 + 100, z / MAP_SIZE * 5 - 100)
-	local rock = math.abs(math.noise(x / 180, z / 180, SEED + 100))
+	local moisture = fbm(x / MAP_SIZE * 5 + 100, z / MAP_SIZE * 5 - 100, 120)
+	local rockNoise = math.abs(math.noise(x / 115, z / 115, SEED + 140))
 
-	if height > 135 then
+	if height >= 155 then
 		return "Mountain"
-	elseif height > 105 and rock > 0.35 then
-		return "Rock"
-	elseif moisture > 0.05 then
+	elseif height >= 105 then
+		return rockNoise > 0.25 and "Rock" or "Forest"
+	elseif moisture > -0.05 then
 		return "Forest"
-	elseif rock > 0.38 then
+	elseif rockNoise > 0.40 then
 		return "Rock"
-	else
-		return "Valley"
 	end
+
+	return "Valley"
 end
 
 local function fillColumn(x: number, z: number, height: number, biome: string)
-	local material = Enum.Material.Grass
-
-	if biome == "Rock" or biome == "Mountain" then
-		material = Enum.Material.Rock
-	elseif biome == "Forest" then
+	local material = Enum.Material.Ground
+	if biome == "Forest" then
 		material = Enum.Material.Grass
-	elseif biome == "Valley" then
-		material = Enum.Material.Ground
+	elseif biome == "Rock" or biome == "Mountain" then
+		material = Enum.Material.Rock
 	end
 
 	Terrain:FillBlock(
-		CFrame.new(x, height / 2 - 15, z),
-		Vector3.new(CELL_SIZE + 1, height + 30, CELL_SIZE + 1),
+		CFrame.new(x, (height - 20) / 2, z),
+		Vector3.new(CELL_SIZE + 1, height + 20, CELL_SIZE + 1),
 		material
 	)
-
-	-- Thin top layer makes transitions less artificial.
-	if biome == "Rock" or biome == "Mountain" then
-		Terrain:FillBlock(
-			CFrame.new(x, height + 1, z),
-			Vector3.new(CELL_SIZE + 1, 4, CELL_SIZE + 1),
-			Enum.Material.Rock
-		)
-	else
-		Terrain:FillBlock(
-			CFrame.new(x, height + 1, z),
-			Vector3.new(CELL_SIZE + 1, 4, CELL_SIZE + 1),
-			Enum.Material.Grass
-		)
-	end
 end
 
-local function createRock(position: Vector3, size: number)
+local function createRock(position: Vector3, size: number, tall: boolean?)
 	local rock = Instance.new("Part")
-	rock.Name = "AlienRock"
+	rock.Name = "CliffRock"
 	rock.Anchored = true
 	rock.Material = Enum.Material.Rock
 	rock.Shape = Enum.PartType.Ball
-	rock.Size = Vector3.new(size, size * rng:NextNumber(0.7, 1.4), size * rng:NextNumber(0.8, 1.5))
-	rock.CFrame = CFrame.new(position) * CFrame.Angles(
-		rng:NextNumber(-0.3, 0.3),
-		rng:NextNumber(0, math.pi),
-		rng:NextNumber(-0.3, 0.3)
+	rock.Size = Vector3.new(
+		size,
+		size * rng:NextNumber(tall and 1.2 or 0.6, tall and 2.4 or 1.2),
+		size * rng:NextNumber(0.7, 1.4)
 	)
-	rock.Parent = workspace
+	rock.CFrame = CFrame.new(position) * CFrame.Angles(
+		rng:NextNumber(-0.25, 0.25),
+		rng:NextNumber(0, math.pi),
+		rng:NextNumber(-0.25, 0.25)
+	)
+	rock.Parent = generated
 end
 
 local function createTree(position: Vector3, scale: number)
@@ -120,82 +121,79 @@ local function createTree(position: Vector3, scale: number)
 	trunk.Name = "Trunk"
 	trunk.Anchored = true
 	trunk.Material = Enum.Material.Wood
-	trunk.Size = Vector3.new(4 * scale, 30 * scale, 4 * scale)
-	trunk.Position = position + Vector3.new(0, 15 * scale, 0)
+	trunk.Size = Vector3.new(3.5 * scale, 28 * scale, 3.5 * scale)
+	trunk.Position = position + Vector3.new(0, 14 * scale, 0)
 	trunk.Parent = model
 
-	for i = 1, 4 do
+	for _ = 1, 4 do
 		local crown = Instance.new("Part")
 		crown.Name = "Foliage"
 		crown.Anchored = true
 		crown.Shape = Enum.PartType.Ball
 		crown.Material = Enum.Material.Grass
-		local s = rng:NextNumber(12, 22) * scale
-		crown.Size = Vector3.new(s, s, s)
+		local size = rng:NextNumber(10, 19) * scale
+		crown.Size = Vector3.new(size, size, size)
 		crown.Position = position + Vector3.new(
-			rng:NextNumber(-10, 10) * scale,
-			30 * scale + rng:NextNumber(-4, 12) * scale,
-			rng:NextNumber(-10, 10) * scale
+			rng:NextNumber(-9, 9) * scale,
+			28 * scale + rng:NextNumber(-4, 12) * scale,
+			rng:NextNumber(-9, 9) * scale
 		)
 		crown.Parent = model
 	end
 
-	model.Parent = workspace
+	model.Parent = generated
 end
 
-local function generateVegetationAndRocks()
-	for x = -MAP_SIZE / 2, MAP_SIZE / 2, CELL_SIZE * 3 do
-		for z = -MAP_SIZE / 2, MAP_SIZE / 2, CELL_SIZE * 3 do
-			local height = getHeight(x, z)
-			local biome = biomeAt(x, z, height)
+local function createJumpLandmark(position: Vector3, name: string)
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Anchored = true
+	part.CanCollide = false
+	part.Transparency = 1
+	part.Size = Vector3.new(10, 10, 10)
+	part.Position = position
+	part.Parent = generated
+end
 
-			if biome == "Forest" and rng:NextNumber() < 0.34 then
-				createTree(Vector3.new(x, height + 2, z), rng:NextNumber(0.8, 1.5))
-			elseif (biome == "Rock" or biome == "Mountain") and rng:NextNumber() < 0.22 then
-				createRock(Vector3.new(x, height + 4, z), rng:NextNumber(10, 32))
-			end
+Terrain:Clear()
+
+-- Main terrain pass.
+for x = -MAP_SIZE / 2, MAP_SIZE / 2, CELL_SIZE do
+	for z = -MAP_SIZE / 2, MAP_SIZE / 2, CELL_SIZE do
+		local height = getHeight(x, z)
+		fillColumn(x, z, height, biomeAt(x, z, height))
+	end
+end
+
+-- Vegetation and rocks are intentionally sparse enough for fast movement.
+for x = -MAP_SIZE / 2, MAP_SIZE / 2, CELL_SIZE * 2 do
+	for z = -MAP_SIZE / 2, MAP_SIZE / 2, CELL_SIZE * 2 do
+		local height = getHeight(x, z)
+		local biome = biomeAt(x, z, height)
+
+		if biome == "Forest" and rng:NextNumber() < 0.24 then
+			createTree(Vector3.new(x, height + 2, z), rng:NextNumber(0.8, 1.45))
+		elseif biome == "Rock" and rng:NextNumber() < 0.18 then
+			createRock(Vector3.new(x, height + 5, z), rng:NextNumber(8, 25), false)
+		elseif biome == "Mountain" and rng:NextNumber() < 0.25 then
+			createRock(Vector3.new(x, height + 8, z), rng:NextNumber(12, 34), true)
 		end
 	end
 end
 
-local function createLandmarks()
-	local folder = Instance.new("Folder")
-	folder.Name = "MapLandmarks"
-	folder.Parent = workspace
+-- High traversal points distributed around the map.
+local landmarkPositions = {
+	{Vector3.new(-390, 0, -330), "ForestOverlook"},
+	{Vector3.new(330, 0, -350), "MountainRidge"},
+	{Vector3.new(410, 0, 250), "RockSpine"},
+	{Vector3.new(-350, 0, 350), "HighPlateau"},
+	{Vector3.new(0, 0, -40), "CentralArena"},
+}
 
-	local points = {
-		{Vector3.new(-520, 0, -460), "NorthForest"},
-		{Vector3.new(500, 0, -420), "MountainRidge"},
-		{Vector3.new(470, 0, 480), "RockyWastes"},
-		{Vector3.new(-500, 0, 500), "HighPlateau"},
-		{Vector3.new(0, 0, 0), "CentralValley"},
-	}
-
-	for _, data in points do
-		local marker = Instance.new("Part")
-		marker.Name = data[2]
-		marker.Anchored = true
-		marker.CanCollide = false
-		marker.Transparency = 1
-		marker.Size = Vector3.new(8, 8, 8)
-		local p = data[1]
-		marker.Position = Vector3.new(p.X, getHeight(p.X, p.Z) + 8, p.Z)
-		marker.Parent = folder
-	end
+for _, data in landmarkPositions do
+	local p = data[1]
+	local y = getHeight(p.X, p.Z)
+	createJumpLandmark(Vector3.new(p.X, y + 6, p.Z), data[2])
 end
 
--- Clear generated terrain before regeneration during Studio testing.
-Terrain:Clear()
-
-for x = -MAP_SIZE / 2, MAP_SIZE / 2, CELL_SIZE do
-	for z = -MAP_SIZE / 2, MAP_SIZE / 2, CELL_SIZE do
-		local height = getHeight(x, z)
-		local biome = biomeAt(x, z, height)
-		fillColumn(x, z, height, biome)
-	end
-end
-
-generateVegetationAndRocks()
-createLandmarks()
-
-print("Rogue map generated successfully.")
+print("Rogue vertical map generated: 1024x1024")
