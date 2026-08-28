@@ -41,20 +41,14 @@ end
 local function getHeight(x: number, z: number): number
 	local nx = x / MAP_SIZE
 	local nz = z / MAP_SIZE
-
-	-- Large-scale landmass keeps the map readable.
 	local continent = fbm(nx * 2.5, nz * 2.5, 0)
 	local detail = fbm(nx * 10, nz * 10, 30) * 10
 
-	-- Long mountain chains create ridges rather than isolated hills.
 	local chain1 = math.abs(math.noise(nx * 2.7 + 4, nz * 1.3 - 8, SEED + 50))
 	local chain2 = math.abs(math.noise(nx * 1.5 - 14, nz * 3.4 + 11, SEED + 80))
 	local ridge = math.max(chain1, chain2)
-
-	-- Sharpen ridges into steep faces.
 	local mountains = math.max(0, ridge - 0.30) ^ 1.7 * 260
 
-	-- A broad central valley prevents the whole map becoming mountainous.
 	local centralDistance = math.sqrt(nx * nx + nz * nz)
 	local valley = math.max(0, 1 - centralDistance * 3.0) * 38
 
@@ -113,37 +107,6 @@ local function createRock(position: Vector3, size: number, tall: boolean?)
 	rock.Parent = generated
 end
 
-local function createTree(position: Vector3, scale: number)
-	local model = Instance.new("Model")
-	model.Name = "AlienTree"
-
-	local trunk = Instance.new("Part")
-	trunk.Name = "Trunk"
-	trunk.Anchored = true
-	trunk.Material = Enum.Material.Wood
-	trunk.Size = Vector3.new(3.5 * scale, 28 * scale, 3.5 * scale)
-	trunk.Position = position + Vector3.new(0, 14 * scale, 0)
-	trunk.Parent = model
-
-	for _ = 1, 4 do
-		local crown = Instance.new("Part")
-		crown.Name = "Foliage"
-		crown.Anchored = true
-		crown.Shape = Enum.PartType.Ball
-		crown.Material = Enum.Material.Grass
-		local size = rng:NextNumber(10, 19) * scale
-		crown.Size = Vector3.new(size, size, size)
-		crown.Position = position + Vector3.new(
-			rng:NextNumber(-9, 9) * scale,
-			28 * scale + rng:NextNumber(-4, 12) * scale,
-			rng:NextNumber(-9, 9) * scale
-		)
-		crown.Parent = model
-	end
-
-	model.Parent = generated
-end
-
 local function createJumpLandmark(position: Vector3, name: string)
 	local part = Instance.new("Part")
 	part.Name = name
@@ -165,15 +128,13 @@ for x = -MAP_SIZE / 2, MAP_SIZE / 2, CELL_SIZE do
 	end
 end
 
--- Vegetation and rocks are intentionally sparse enough for fast movement.
+-- Rocks only for now. Forest vegetation will use proper assets later.
 for x = -MAP_SIZE / 2, MAP_SIZE / 2, CELL_SIZE * 2 do
 	for z = -MAP_SIZE / 2, MAP_SIZE / 2, CELL_SIZE * 2 do
 		local height = getHeight(x, z)
 		local biome = biomeAt(x, z, height)
 
-		if biome == "Forest" and rng:NextNumber() < 0.24 then
-			createTree(Vector3.new(x, height + 2, z), rng:NextNumber(0.8, 1.45))
-		elseif biome == "Rock" and rng:NextNumber() < 0.18 then
+		if biome == "Rock" and rng:NextNumber() < 0.18 then
 			createRock(Vector3.new(x, height + 5, z), rng:NextNumber(8, 25), false)
 		elseif biome == "Mountain" and rng:NextNumber() < 0.25 then
 			createRock(Vector3.new(x, height + 8, z), rng:NextNumber(12, 34), true)
@@ -181,7 +142,6 @@ for x = -MAP_SIZE / 2, MAP_SIZE / 2, CELL_SIZE * 2 do
 	end
 end
 
--- High traversal points distributed around the map.
 local landmarkPositions = {
 	{Vector3.new(-390, 0, -330), "ForestOverlook"},
 	{Vector3.new(330, 0, -350), "MountainRidge"},
