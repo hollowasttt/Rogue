@@ -18,8 +18,6 @@ local dashKick = 0
 local lastSpeed = 0
 local dashFlash = 0
 
--- Recoil is kept as a separate camera offset. The target is pulled back to
--- zero every frame, while the current value smoothly follows it.
 local recoilPitch = 0
 local recoilYaw = 0
 local recoilTargetPitch = 0
@@ -45,7 +43,8 @@ if player.Character then updateCharacter(player.Character) end
 player.CharacterAdded:Connect(updateCharacter)
 
 function CameraController.Init()
-	RunService:BindToRenderStep("RogueCameraController", Enum.RenderPriority.Camera.Value + 1, function(deltaTime)
+	-- Run after Roblox's default camera update so recoil cannot be overwritten.
+	RunService:BindToRenderStep("RogueCameraController", Enum.RenderPriority.Last.Value, function(deltaTime)
 		local camera = workspace.CurrentCamera
 		if not camera or not humanoid or not root then return end
 
@@ -103,16 +102,16 @@ function CameraController.Init()
 			camera.CFrame *= CFrame.Angles(0, 0, roll)
 		end
 
-		-- Every shot adds to the target kick. The target itself continuously
-		-- returns to zero, so the camera always comes back to the exact aim.
-		local targetRecovery = 1 - math.exp(-PythonEliteConfig.RecoilRecoverySpeed * 1.35 * deltaTime)
-		recoilTargetPitch += (0 - recoilTargetPitch) * targetRecovery
-		recoilTargetYaw += (0 - recoilTargetYaw) * targetRecovery
+		-- Recoil target returns to zero. Current recoil follows it smoothly.
+		local targetRecovery = 1 - math.exp(-PythonEliteConfig.RecoilRecoverySpeed * deltaTime)
+		recoilTargetPitch += -recoilTargetPitch * targetRecovery
+		recoilTargetYaw += -recoilTargetYaw * targetRecovery
 
 		local follow = 1 - math.exp(-32 * deltaTime)
 		recoilPitch += (recoilTargetPitch - recoilPitch) * follow
 		recoilYaw += (recoilTargetYaw - recoilYaw) * follow
 
+		-- This is the final camera transform for this frame.
 		camera.CFrame *= CFrame.Angles(math.rad(recoilPitch), math.rad(recoilYaw), 0)
 	end)
 end
