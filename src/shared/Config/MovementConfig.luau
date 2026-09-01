@@ -5,7 +5,7 @@ return {
 	GroundFriction = 8,
 	AirFriction = 0.5,
 
-	DashSpeed = 125,
+	DashSpeed = 100,
 	DashDuration = 0.14,
 	DashCooldown = 0.35,
 	DashAirControl = 0.35,
