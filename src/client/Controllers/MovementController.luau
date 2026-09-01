@@ -9,12 +9,12 @@ local player = Players.LocalPlayer
 local MovementController = {}
 
 local canDash = true
-local canSlide = true
 local isSliding = false
 local isDashing = false
 local dashStartedAt = 0
 local slideStartedAt = 0
 local dashDirection = Vector3.zero
+local slideVelocity = Vector3.zero
 
 local character, humanoid, root
 
@@ -25,7 +25,8 @@ local function updateCharacter(char)
 	isSliding = false
 	isDashing = false
 	canDash = true
-	canSlide = true
+	dashDirection = Vector3.zero
+	slideVelocity = Vector3.zero
 	humanoid.WalkSpeed = MovementConfig.WalkSpeed
 	humanoid.JumpPower = MovementConfig.JumpPower
 end
@@ -53,7 +54,7 @@ local function getMoveDirection()
 end
 
 local function dash()
-	if not canDash or isDashing or not root then return end
+	if not canDash or isDashing or isSliding or not root then return end
 
 	canDash = false
 	isDashing = true
@@ -62,22 +63,14 @@ local function dash()
 
 	local velocity = root.AssemblyLinearVelocity
 	local horizontal = flat(velocity)
-
-	-- Add the dash to existing momentum instead of replacing it.
-	-- This prevents a normal run from feeling like it suddenly hits a wall.
 	local forwardSpeed = math.max(0, horizontal:Dot(dashDirection))
-	local targetSpeed = MovementConfig.DashSpeed + forwardSpeed * 0.15
-	local dashVelocity = dashDirection * targetSpeed
 
-	root.AssemblyLinearVelocity = Vector3.new(
-		dashVelocity.X,
-		velocity.Y,
-		dashVelocity.Z
-	)
+	-- Dash is a burst on top of the player's existing movement.
+	-- Never apply ground friction or reset the player's momentum during it.
+	local dashSpeed = MovementConfig.DashSpeed + forwardSpeed * 0.15
+	local dashVelocity = dashDirection * dashSpeed
 
-	task.delay(MovementConfig.DashDuration, function()
-		isDashing = false
-	end)
+	root.AssemblyLinearVelocity = Vector3.new(dashVelocity.X, velocity.Y, dashVelocity.Z)
 
 	task.delay(MovementConfig.DashCooldown, function()
 		canDash = true
@@ -85,39 +78,30 @@ local function dash()
 end
 
 local function startSlide()
-	if not canSlide or isSliding or isDashing or not root then return end
+	if isSliding or isDashing or not root then return end
 	if humanoid.FloorMaterial == Enum.Material.Air then return end
 
-	local direction = getMoveDirection()
 	local horizontal = flat(root.AssemblyLinearVelocity)
 	local speed = horizontal.Magnitude
 
-	-- Walking should be enough to start a slide; don't require a sprint system yet.
 	if speed < MovementConfig.MinSpeedToSlide then
-		speed = MovementConfig.WalkSpeed
+		return
 	end
 
+	-- Capture the exact speed and direction at the instant the slide starts.
+	-- We do not snap it to a fixed SlideSpeed.
+	slideVelocity = horizontal
 	isSliding = true
-	canSlide = false
 	slideStartedAt = os.clock()
 	humanoid.WalkSpeed = 0
-
-	local slideSpeed = math.max(speed, MovementConfig.SlideSpeed)
-	root.AssemblyLinearVelocity = Vector3.new(
-		direction.X * slideSpeed,
-		root.AssemblyLinearVelocity.Y,
-		direction.Z * slideSpeed
-	)
-
-	task.delay(MovementConfig.SlideCooldown, function()
-		canSlide = true
-	end)
+	humanoid.JumpPower = 0
 end
 
 local function stopSlide()
 	if not isSliding then return end
 
 	isSliding = false
+	slideVelocity = Vector3.zero
 	humanoid.WalkSpeed = MovementConfig.WalkSpeed
 	humanoid.JumpPower = MovementConfig.JumpPower
 end
@@ -125,12 +109,10 @@ end
 local function slideJump()
 	if not isSliding or not root then return end
 
-	local velocity = root.AssemblyLinearVelocity
-	local horizontal = flat(velocity) * MovementConfig.SlideJumpBoost
-
+	local velocity = slideVelocity * MovementConfig.SlideJumpBoost
 	stopSlide()
 	humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-	root.AssemblyLinearVelocity = Vector3.new(horizontal.X, MovementConfig.JumpPower, horizontal.Z)
+	root.AssemblyLinearVelocity = Vector3.new(velocity.X, MovementConfig.JumpPower, velocity.Z)
 end
 
 function MovementController.Init()
@@ -155,17 +137,20 @@ function MovementController.Init()
 	RunService.Heartbeat:Connect(function(deltaTime)
 		if not humanoid or not root or humanoid.Health <= 0 then return end
 
-		-- Keep the dash velocity alive for its short duration. Roblox's Humanoid
-		-- controller can otherwise overwrite AssemblyLinearVelocity immediately.
+		-- Lock the dash direction/speed briefly so the Humanoid controller cannot
+		-- instantly kill the burst when the player's feet are touching the ground.
 		if isDashing then
 			if os.clock() - dashStartedAt >= MovementConfig.DashDuration then
 				isDashing = false
 			else
 				local velocity = root.AssemblyLinearVelocity
-				local current = flat(velocity)
-				local speed = math.max(MovementConfig.DashSpeed, current:Dot(dashDirection))
-				local target = dashDirection * speed
-				root.AssemblyLinearVelocity = Vector3.new(target.X, velocity.Y, target.Z)
+				local currentForward = flat(velocity):Dot(dashDirection)
+				local speed = math.max(MovementConfig.DashSpeed, currentForward)
+				root.AssemblyLinearVelocity = Vector3.new(
+					dashDirection.X * speed,
+					velocity.Y,
+					dashDirection.Z * speed
+				)
 			end
 		end
 
@@ -186,19 +171,22 @@ function MovementController.Init()
 			return
 		end
 
-		local velocity = root.AssemblyLinearVelocity
-		local horizontal = flat(velocity)
-		local speed = horizontal.Magnitude
+		-- Smoothly bleed off the captured slide momentum. There is no sudden
+		-- speed reset: fast entry means a fast slide, then gradual deceleration.
+		local friction = math.max(0, 1 - MovementConfig.SlideFriction * deltaTime)
+		slideVelocity *= friction
 
-		if speed <= 2 then
+		if slideVelocity.Magnitude <= MovementConfig.SlideMinSpeed then
 			stopSlide()
 			return
 		end
 
-		local friction = math.max(0, 1 - MovementConfig.SlideFriction * deltaTime)
-		horizontal *= friction
-
-		root.AssemblyLinearVelocity = Vector3.new(horizontal.X, velocity.Y, horizontal.Z)
+		local velocity = root.AssemblyLinearVelocity
+		root.AssemblyLinearVelocity = Vector3.new(
+			slideVelocity.X,
+			velocity.Y,
+			slideVelocity.Z
+		)
 	end)
 end
 
