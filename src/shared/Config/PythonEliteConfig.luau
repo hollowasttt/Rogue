@@ -8,7 +8,7 @@ return {
 	Range = 600,
 
 	-- Camera recoil. Values are degrees per shot.
-	RecoilPitch = 4.4,
-	RecoilYaw = 0.9,
+	RecoilPitch = 8.8,
+	RecoilYaw = 1.8,
 	RecoilRecoverySpeed = 18,
 }
