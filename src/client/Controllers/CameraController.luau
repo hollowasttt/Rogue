@@ -16,16 +16,17 @@ local dashKick = 0
 local lastSpeed = 0
 local dashFlash = 0
 
--- Recoil is queued by the weapon and applied directly from the camera render step.
+-- Recoil is stored as an offset and applied every render frame.
+-- This makes the kick clearly visible instead of existing for only one frame.
 local recoilPitch = 0
 local recoilYaw = 0
-local recoilKickPitch = 0
-local recoilKickYaw = 0
+local recoilPitchVelocity = 0
+local recoilYawVelocity = 0
 
 function CameraController.AddRecoil(pitch, yaw)
-	-- Accumulate the requested kick. The camera consumes it on the next render frame.
-	recoilKickPitch += pitch
-	recoilKickYaw += yaw
+	-- Add an immediate, visible kick and a small random horizontal component.
+	recoilPitchVelocity += pitch
+	recoilYawVelocity += yaw
 end
 
 local function updateCharacter(character)
@@ -34,8 +35,8 @@ local function updateCharacter(character)
 	currentOffset = Vector3.zero
 	recoilPitch = 0
 	recoilYaw = 0
-	recoilKickPitch = 0
-	recoilKickYaw = 0
+	recoilPitchVelocity = 0
+	recoilYawVelocity = 0
 	humanoid.CameraOffset = currentOffset
 end
 
@@ -101,23 +102,20 @@ function CameraController.Init()
 			camera.CFrame *= CFrame.Angles(0, 0, roll)
 		end
 
-		-- Consume the shot immediately. This is intentionally very strong for testing.
-		if math.abs(recoilKickPitch) > 0.001 or math.abs(recoilKickYaw) > 0.001 then
-			local pitch = recoilKickPitch
-			local yaw = recoilKickYaw
-			recoilKickPitch = 0
-			recoilKickYaw = 0
-
-			recoilPitch += pitch
-			recoilYaw += yaw
-			camera.CFrame *= CFrame.Angles(math.rad(-pitch), math.rad(yaw), 0)
+		-- Apply recoil after Roblox's camera update so it cannot be overwritten.
+		-- The kick remains visible for several frames and smoothly returns to zero.
+		if math.abs(recoilPitchVelocity) > 0.001 or math.abs(recoilYawVelocity) > 0.001 then
+			recoilPitch += recoilPitchVelocity
+			recoilYaw += recoilYawVelocity
+		recoilPitchVelocity = 0
+		recoilYawVelocity = 0
 		end
 
-		-- Smoothly return the recoil state. This does not modify the camera directly;
-		-- it only keeps the accumulated state ready for future shots.
-		local recovery = 1 - math.exp(-10 * deltaTime)
+		local recovery = 1 - math.exp(-12 * deltaTime)
 		recoilPitch += (0 - recoilPitch) * recovery
 		recoilYaw += (0 - recoilYaw) * recovery
+
+		camera.CFrame *= CFrame.Angles(math.rad(-recoilPitch), math.rad(recoilYaw), 0)
 	end)
 end
 
