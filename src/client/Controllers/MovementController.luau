@@ -31,26 +31,18 @@ local function updateCharacter(char)
 	humanoid.JumpPower = MovementConfig.JumpPower
 end
 
-if player.Character then
-	updateCharacter(player.Character)
-end
+if player.Character then updateCharacter(player.Character) end
 player.CharacterAdded:Connect(updateCharacter)
 
-local function flat(vector)
-	return Vector3.new(vector.X, 0, vector.Z)
+local function flat(v)
+	return Vector3.new(v.X, 0, v.Z)
 end
 
 local function getMoveDirection()
 	local dir = flat(humanoid.MoveDirection)
-	if dir.Magnitude >= 0.1 then
-		return dir.Unit
-	end
-
+	if dir.Magnitude >= 0.1 then return dir.Unit end
 	local look = flat(root.CFrame.LookVector)
-	if look.Magnitude < 0.1 then
-		return Vector3.new(0, 0, -1)
-	end
-	return look.Unit
+	return look.Magnitude >= 0.1 and look.Unit or Vector3.new(0, 0, -1)
 end
 
 local function dash()
@@ -68,21 +60,19 @@ local function dash()
 	local dashVelocity = dashDirection * dashSpeed
 
 	root.AssemblyLinearVelocity = Vector3.new(dashVelocity.X, velocity.Y, dashVelocity.Z)
-
-	task.delay(MovementConfig.DashCooldown, function()
-		canDash = true
-	end)
+	task.delay(MovementConfig.DashCooldown, function() canDash = true end)
 end
 
 local function startSlide()
-	if isSliding or isDashing or not root then return end
-	if humanoid.FloorMaterial == Enum.Material.Air then return end
+	-- A slide can begin immediately after a dash. Do not require W to be held.
+	if isSliding or not root or humanoid.FloorMaterial == Enum.Material.Air then return end
 
 	local horizontal = flat(root.AssemblyLinearVelocity)
 	local speed = horizontal.Magnitude
 	if speed < MovementConfig.MinSpeedToSlide then return end
 
-	-- Preserve exactly the momentum we had when entering the slide.
+	-- Capture the actual current velocity. If the player is doing 120 speed,
+	-- the slide starts at 120 rather than snapping down to a fixed SlideSpeed.
 	slideVelocity = horizontal
 	isSliding = true
 	slideStartedAt = os.clock()
@@ -100,7 +90,6 @@ end
 
 local function slideJump()
 	if not isSliding or not root then return end
-
 	local velocity = slideVelocity * MovementConfig.SlideJumpBoost
 	stopSlide()
 	humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
@@ -114,7 +103,6 @@ end
 function MovementController.Init()
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if processed then return end
-
 		if input.KeyCode == Enum.KeyCode.Q then
 			dash()
 		elseif input.KeyCode == Enum.KeyCode.LeftControl then
@@ -125,16 +113,13 @@ function MovementController.Init()
 	end)
 
 	UserInputService.InputEnded:Connect(function(input)
-		if input.KeyCode == Enum.KeyCode.LeftControl then
-			stopSlide()
-		end
+		if input.KeyCode == Enum.KeyCode.LeftControl then stopSlide() end
 	end)
 
 	RunService.Heartbeat:Connect(function(deltaTime)
 		if not humanoid or not root or humanoid.Health <= 0 then return end
 
-		-- During dash, continuously restore the burst velocity. This prevents
-		-- the grounded Humanoid controller from immediately braking the player.
+		-- Keep dash velocity alive against the grounded Humanoid controller.
 		if isDashing then
 			if os.clock() - dashStartedAt >= MovementConfig.DashDuration then
 				isDashing = false
@@ -167,8 +152,7 @@ function MovementController.Init()
 			return
 		end
 
-		-- Slide is independent of WASD. Releasing W cannot kill momentum.
-		-- Friction slowly reduces the captured velocity over time.
+		-- W/A/S/D is irrelevant while sliding. Momentum decays smoothly on its own.
 		local friction = math.max(0, 1 - MovementConfig.SlideFriction * deltaTime)
 		slideVelocity *= friction
 
@@ -178,11 +162,7 @@ function MovementController.Init()
 		end
 
 		local velocity = root.AssemblyLinearVelocity
-		root.AssemblyLinearVelocity = Vector3.new(
-			slideVelocity.X,
-			velocity.Y,
-			slideVelocity.Z
-		)
+		root.AssemblyLinearVelocity = Vector3.new(slideVelocity.X, velocity.Y, slideVelocity.Z)
 	end)
 end
 
