@@ -17,16 +17,16 @@ local dashKick = 0
 local lastSpeed = 0
 local dashFlash = 0
 
--- Recoil is stored as a temporary camera rotation and ALWAYS decays back to zero.
+-- Recoil is a visual offset applied after Roblox's camera update.
+-- It smoothly returns to zero and never modifies the player's actual aim.
 local recoilPitch = 0
 local recoilYaw = 0
-local recoilPitchVelocity = 0
-local recoilYawVelocity = 0
+local recoilTargetPitch = 0
+local recoilTargetYaw = 0
 
 function CameraController.AddRecoil(pitch, yaw)
-	-- Instant kick, followed by a damped return to the exact original aim.
-	recoilPitchVelocity += pitch * 55
-	recoilYawVelocity += yaw * 55
+	recoilTargetPitch += pitch
+	recoilTargetYaw += yaw
 end
 
 local function updateCharacter(character)
@@ -35,12 +35,14 @@ local function updateCharacter(character)
 	currentOffset = Vector3.zero
 	recoilPitch = 0
 	recoilYaw = 0
-	recoilPitchVelocity = 0
-	recoilYawVelocity = 0
+	recoilTargetPitch = 0
+	recoilTargetYaw = 0
 	humanoid.CameraOffset = currentOffset
 end
 
-if player.Character then updateCharacter(player.Character) end
+if player.Character then
+	updateCharacter(player.Character)
+end
 player.CharacterAdded:Connect(updateCharacter)
 
 function CameraController.Init()
@@ -102,29 +104,22 @@ function CameraController.Init()
 			camera.CFrame *= CFrame.Angles(0, 0, roll)
 		end
 
-		-- Apply recoil as a velocity impulse. The spring is critically damped,
-		-- so both pitch and yaw return all the way to exactly zero.
-		local stiffness = 170
-		local damping = 25
+		-- Recoil target returns to zero independently of the camera's real aim.
+		local targetRecovery = 1 - math.exp(-MovementConfig.RecoilRecoverySpeed * deltaTime)
+		recoilTargetPitch += -recoilTargetPitch * targetRecovery
+		recoilTargetYaw += -recoilTargetYaw * targetRecovery
 
-		recoilPitchVelocity += -recoilPitch * stiffness * deltaTime
-		recoilYawVelocity += -recoilYaw * stiffness * deltaTime
+		local follow = 1 - math.exp(-35 * deltaTime)
+		recoilPitch += (recoilTargetPitch - recoilPitch) * follow
+		recoilYaw += (recoilTargetYaw - recoilYaw) * follow
 
-		local dampingFactor = math.exp(-damping * deltaTime)
-		recoilPitchVelocity *= dampingFactor
-		recoilYawVelocity *= dampingFactor
-
-		recoilPitch += recoilPitchVelocity * deltaTime
-		recoilYaw += recoilYawVelocity * deltaTime
-
-		-- Prevent tiny floating-point remnants from keeping the camera offset.
-		if math.abs(recoilPitch) < 0.001 and math.abs(recoilPitchVelocity) < 0.01 then
+		if math.abs(recoilTargetPitch) < 0.0001 and math.abs(recoilPitch) < 0.001 then
+			recoilTargetPitch = 0
 			recoilPitch = 0
-			recoilPitchVelocity = 0
 		end
-		if math.abs(recoilYaw) < 0.001 and math.abs(recoilYawVelocity) < 0.01 then
+		if math.abs(recoilTargetYaw) < 0.0001 and math.abs(recoilYaw) < 0.001 then
+			recoilTargetYaw = 0
 			recoilYaw = 0
-			recoilYawVelocity = 0
 		end
 
 		camera.CFrame *= CFrame.Angles(math.rad(recoilPitch), math.rad(recoilYaw), 0)
