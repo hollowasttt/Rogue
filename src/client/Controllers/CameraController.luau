@@ -3,7 +3,6 @@ local RunService = game:GetService("RunService")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MovementConfig = require(ReplicatedStorage.Shared.Config.MovementConfig)
-local PythonEliteConfig = require(ReplicatedStorage.Shared.Config.PythonEliteConfig)
 local MovementController = require(script.Parent.MovementController)
 
 local player = Players.LocalPlayer
@@ -18,6 +17,9 @@ local dashKick = 0
 local lastSpeed = 0
 local dashFlash = 0
 
+-- Recoil is a purely visual camera-space offset.
+-- We apply only the CHANGE since the previous frame, so the camera
+-- never accumulates the recoil forever.
 local recoilPitch = 0
 local recoilYaw = 0
 local recoilTargetPitch = 0
@@ -103,24 +105,32 @@ function CameraController.Init()
 			camera.CFrame *= CFrame.Angles(0, 0, roll)
 		end
 
-		local targetRecovery = 1 - math.exp(-PythonEliteConfig.RecoilRecoverySpeed * deltaTime)
-		recoilTargetPitch += -recoilTargetPitch * targetRecovery
-		recoilTargetYaw += -recoilTargetYaw * targetRecovery
+		-- Move the visual recoil target back to zero.
+		local recovery = 1 - math.exp(-18 * deltaTime)
+		recoilTargetPitch += -recoilTargetPitch * recovery
+		recoilTargetYaw += -recoilTargetYaw * recovery
 
-		local follow = 1 - math.exp(-35 * deltaTime)
+		-- Smoothly follow the target recoil.
+		local follow = 1 - math.exp(-40 * deltaTime)
+		local previousPitch = recoilPitch
+		local previousYaw = recoilYaw
 		recoilPitch += (recoilTargetPitch - recoilPitch) * follow
 		recoilYaw += (recoilTargetYaw - recoilYaw) * follow
 
-		if math.abs(recoilTargetPitch) < 0.0001 and math.abs(recoilPitch) < 0.001 then
+		-- Apply ONLY this frame's delta. This is the key difference:
+		-- the camera is never permanently rotated by recoil.
+		local pitchDelta = recoilPitch - previousPitch
+		local yawDelta = recoilYaw - previousYaw
+		camera.CFrame *= CFrame.Angles(math.rad(pitchDelta), math.rad(yawDelta), 0)
+
+		if math.abs(recoilTargetPitch) < 0.0001 and math.abs(recoilPitch) < 0.0001 then
 			recoilTargetPitch = 0
 			recoilPitch = 0
 		end
-		if math.abs(recoilTargetYaw) < 0.0001 and math.abs(recoilYaw) < 0.001 then
+		if math.abs(recoilTargetYaw) < 0.0001 and math.abs(recoilYaw) < 0.0001 then
 			recoilTargetYaw = 0
 			recoilYaw = 0
 		end
-
-		camera.CFrame *= CFrame.Angles(math.rad(recoilPitch), math.rad(recoilYaw), 0)
 	end)
 end
 
