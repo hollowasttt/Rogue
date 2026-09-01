@@ -18,7 +18,6 @@ local dashKick = 0
 local lastSpeed = 0
 local dashFlash = 0
 
--- Recoil is stored as an offset and applied every render frame.
 local recoilPitch = 0
 local recoilYaw = 0
 local recoilPitchVelocity = 0
@@ -102,7 +101,7 @@ function CameraController.Init()
 			camera.CFrame *= CFrame.Angles(0, 0, roll)
 		end
 
-		-- Apply recoil after Roblox's camera update so it cannot be overwritten.
+		-- Apply the shot kick first, then recover all the way back to zero.
 		if math.abs(recoilPitchVelocity) > 0.001 or math.abs(recoilYawVelocity) > 0.001 then
 			recoilPitch += recoilPitchVelocity
 			recoilYaw += recoilYawVelocity
@@ -110,12 +109,11 @@ function CameraController.Init()
 			recoilYawVelocity = 0
 		end
 
-		-- Recoil smoothly returns to the original aim direction.
 		local recovery = 1 - math.exp(-PythonEliteConfig.RecoilRecoverySpeed * deltaTime)
-		recoilPitch += (0 - recoilPitch) * recovery
-		recoilYaw += (0 - recoilYaw) * recovery
+		recoilPitch *= (1 - recovery)
+		recoilYaw *= (1 - recovery)
 
-		-- Positive X rotation moves the camera upward for the desired gun kick.
+		-- Positive pitch kicks the camera upward; zero is the original aim.
 		camera.CFrame *= CFrame.Angles(math.rad(recoilPitch), math.rad(recoilYaw), 0)
 	end)
 end
