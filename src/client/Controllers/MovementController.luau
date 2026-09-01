@@ -4,28 +4,22 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local MovementConfig = require(ReplicatedStorage.Shared.Config.MovementConfig)
-
 local player = Players.LocalPlayer
 local MovementController = {}
 
-local canDash = true
-local isSliding = false
-local isDashing = false
+local canDash, isSliding, isDashing, slideQueued = true, false, false, false
 local dashStartedAt = 0
 local dashDirection = Vector3.zero
 local slideVelocity = Vector3.zero
-
+local airMomentum = Vector3.zero
 local character, humanoid, root
 
 local function updateCharacter(char)
 	character = char
 	humanoid = char:WaitForChild("Humanoid")
 	root = char:WaitForChild("HumanoidRootPart")
-	isSliding = false
-	isDashing = false
-	canDash = true
-	dashDirection = Vector3.zero
-	slideVelocity = Vector3.zero
+	canDash, isSliding, isDashing, slideQueued = true, false, false, false
+	dashDirection, slideVelocity, airMomentum = Vector3.zero, Vector3.zero, Vector3.zero
 	humanoid.WalkSpeed = MovementConfig.WalkSpeed
 	humanoid.JumpPower = MovementConfig.JumpPower
 end
@@ -33,9 +27,7 @@ end
 if player.Character then updateCharacter(player.Character) end
 player.CharacterAdded:Connect(updateCharacter)
 
-local function flat(v)
-	return Vector3.new(v.X, 0, v.Z)
-end
+local function flat(v) return Vector3.new(v.X, 0, v.Z) end
 
 local function getMoveDirection()
 	local dir = flat(humanoid.MoveDirection)
@@ -46,55 +38,40 @@ end
 
 local function dash()
 	if not canDash or isDashing or isSliding or not root then return end
-
-	canDash = false
-	isDashing = true
-	dashStartedAt = os.clock()
-
-	-- Dash follows the camera's full 3D look direction. Looking up/down lets
-	-- the player dash vertically instead of flattening the dash to the ground.
+	canDash, isDashing, dashStartedAt = false, true, os.clock()
 	local camera = workspace.CurrentCamera
-	if camera then
-		dashDirection = camera.CFrame.LookVector.Unit
-	else
-		dashDirection = getMoveDirection()
-	end
-
+	dashDirection = camera and camera.CFrame.LookVector.Unit or getMoveDirection()
 	root.AssemblyLinearVelocity = dashDirection * MovementConfig.DashSpeed
-
-	task.delay(MovementConfig.DashCooldown, function()
-		canDash = true
-	end)
+	task.delay(MovementConfig.DashCooldown, function() canDash = true end)
 end
 
 local function startSlide()
-	if isSliding or not root or humanoid.FloorMaterial == Enum.Material.Air then return end
+	if isSliding or not root then return false end
+	if humanoid.FloorMaterial == Enum.Material.Air then
+		slideQueued = true
+		return false
+	end
 
 	local horizontal = flat(root.AssemblyLinearVelocity)
 	local speed = horizontal.Magnitude
-
-	-- From rest, start slightly faster than walking. Otherwise preserve all
-	-- existing horizontal momentum, including momentum coming from a dash.
 	if speed < MovementConfig.SlideStartSpeed then
 		slideVelocity = getMoveDirection() * MovementConfig.SlideStartSpeed
 	else
 		slideVelocity = horizontal
 	end
 
-	isSliding = true
+	isSliding, slideQueued = true, false
 	humanoid.WalkSpeed = 0
 	humanoid.JumpPower = 0
+	return true
 end
 
 local function stopSlide()
 	if not isSliding then return end
-
-	-- Preserve the final slide momentum when Ctrl is released.
 	if root then
 		local current = root.AssemblyLinearVelocity
 		root.AssemblyLinearVelocity = Vector3.new(slideVelocity.X, current.Y, slideVelocity.Z)
 	end
-
 	isSliding = false
 	humanoid.WalkSpeed = MovementConfig.WalkSpeed
 	humanoid.JumpPower = MovementConfig.JumpPower
@@ -108,9 +85,7 @@ local function slideJump()
 	root.AssemblyLinearVelocity = Vector3.new(velocity.X, MovementConfig.JumpPower, velocity.Z)
 end
 
-function MovementController.IsSliding()
-	return isSliding
-end
+function MovementController.IsSliding() return isSliding end
 
 function MovementController.Init()
 	UserInputService.InputBegan:Connect(function(input, processed)
@@ -125,40 +100,66 @@ function MovementController.Init()
 	end)
 
 	UserInputService.InputEnded:Connect(function(input)
-		if input.KeyCode == Enum.KeyCode.LeftControl then stopSlide() end
+		if input.KeyCode == Enum.KeyCode.LeftControl then
+			slideQueued = false
+			stopSlide()
+		end
 	end)
 
 	RunService.Heartbeat:Connect(function(deltaTime)
 		if not humanoid or not root or humanoid.Health <= 0 then return end
 
+		local grounded = humanoid.FloorMaterial ~= Enum.Material.Air
+
+		-- Preserve horizontal air momentum instead of allowing Humanoid WalkSpeed
+		-- to bleed it down while airborne. Input can steer, but does not reset speed.
+		if not grounded and not isSliding and not isDashing then
+			local horizontal = flat(root.AssemblyLinearVelocity)
+			if horizontal.Magnitude > MovementConfig.WalkSpeed then
+				airMomentum = horizontal
+			else
+				airMomentum = Vector3.zero
+			end
+
+			if airMomentum.Magnitude > 0 then
+				local inputDirection = flat(humanoid.MoveDirection)
+				if inputDirection.Magnitude > 0.1 then
+					local steer = inputDirection.Unit * airMomentum.Magnitude
+					airMomentum = airMomentum:Lerp(steer, math.clamp(MovementConfig.AirControl * deltaTime, 0, 1))
+				end
+				local velocity = root.AssemblyLinearVelocity
+				root.AssemblyLinearVelocity = Vector3.new(airMomentum.X, velocity.Y, airMomentum.Z)
+			end
+		else
+			if grounded and not isSliding and not isDashing then
+				airMomentum = Vector3.zero
+			end
+		end
+
 		if isDashing then
 			if os.clock() - dashStartedAt >= MovementConfig.DashDuration then
 				isDashing = false
 			else
-				-- Keep the full 3D dash vector alive for the duration of the burst.
 				root.AssemblyLinearVelocity = dashDirection * MovementConfig.DashSpeed
 			end
 		end
 
-		if not isSliding then
-			if humanoid.WalkSpeed ~= MovementConfig.WalkSpeed then
-				humanoid.WalkSpeed = MovementConfig.WalkSpeed
+		-- Ctrl pressed in the air is buffered and automatically becomes a slide on landing.
+		if slideQueued and not isSliding and grounded then
+			startSlide()
+		end
+
+		if isSliding then
+			local speed = slideVelocity.Magnitude
+			if speed > MovementConfig.SlideMinSpeed then
+				local newSpeed = math.max(MovementConfig.SlideMinSpeed, speed * math.max(0, 1 - MovementConfig.SlideFriction * deltaTime))
+				slideVelocity = slideVelocity.Unit * newSpeed
 			end
-			return
+			local velocity = root.AssemblyLinearVelocity
+			root.AssemblyLinearVelocity = Vector3.new(slideVelocity.X, velocity.Y, slideVelocity.Z)
+		elseif humanoid.WalkSpeed ~= MovementConfig.WalkSpeed then
+			humanoid.WalkSpeed = MovementConfig.WalkSpeed
 		end
-
-		-- While sliding, Ctrl owns horizontal movement. WASD cannot cancel it.
-		local speed = slideVelocity.Magnitude
-		if speed > MovementConfig.SlideMinSpeed then
-			local newSpeed = math.max(
-				MovementConfig.SlideMinSpeed,
-				speed * math.max(0, 1 - MovementConfig.SlideFriction * deltaTime)
-			)
-			slideVelocity = slideVelocity.Unit * newSpeed
-		end
-
-		local velocity = root.AssemblyLinearVelocity
-		root.AssemblyLinearVelocity = Vector3.new(slideVelocity.X, velocity.Y, slideVelocity.Z)
 	end)
 end
 
