@@ -18,14 +18,16 @@ local dashKick = 0
 local lastSpeed = 0
 local dashFlash = 0
 
+-- Recoil is kept as a separate camera offset. The target is pulled back to
+-- zero every frame, while the current value smoothly follows it.
 local recoilPitch = 0
 local recoilYaw = 0
-local recoilPitchVelocity = 0
-local recoilYawVelocity = 0
+local recoilTargetPitch = 0
+local recoilTargetYaw = 0
 
 function CameraController.AddRecoil(pitch, yaw)
-	recoilPitchVelocity += pitch
-	recoilYawVelocity += yaw
+	recoilTargetPitch += pitch
+	recoilTargetYaw += yaw
 end
 
 local function updateCharacter(character)
@@ -34,8 +36,8 @@ local function updateCharacter(character)
 	currentOffset = Vector3.zero
 	recoilPitch = 0
 	recoilYaw = 0
-	recoilPitchVelocity = 0
-	recoilYawVelocity = 0
+	recoilTargetPitch = 0
+	recoilTargetYaw = 0
 	humanoid.CameraOffset = currentOffset
 end
 
@@ -101,19 +103,16 @@ function CameraController.Init()
 			camera.CFrame *= CFrame.Angles(0, 0, roll)
 		end
 
-		-- Apply the shot kick first, then recover all the way back to zero.
-		if math.abs(recoilPitchVelocity) > 0.001 or math.abs(recoilYawVelocity) > 0.001 then
-			recoilPitch += recoilPitchVelocity
-			recoilYaw += recoilYawVelocity
-			recoilPitchVelocity = 0
-			recoilYawVelocity = 0
-		end
+		-- Every shot adds to the target kick. The target itself continuously
+		-- returns to zero, so the camera always comes back to the exact aim.
+		local targetRecovery = 1 - math.exp(-PythonEliteConfig.RecoilRecoverySpeed * 1.35 * deltaTime)
+		recoilTargetPitch += (0 - recoilTargetPitch) * targetRecovery
+		recoilTargetYaw += (0 - recoilTargetYaw) * targetRecovery
 
-		local recovery = 1 - math.exp(-PythonEliteConfig.RecoilRecoverySpeed * deltaTime)
-		recoilPitch *= (1 - recovery)
-		recoilYaw *= (1 - recovery)
+		local follow = 1 - math.exp(-32 * deltaTime)
+		recoilPitch += (recoilTargetPitch - recoilPitch) * follow
+		recoilYaw += (recoilTargetYaw - recoilYaw) * follow
 
-		-- Positive pitch kicks the camera upward; zero is the original aim.
 		camera.CFrame *= CFrame.Angles(math.rad(recoilPitch), math.rad(recoilYaw), 0)
 	end)
 end
