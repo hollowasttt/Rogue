@@ -1,7 +1,9 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
-local MovementConfig = require(game:GetService("ReplicatedStorage").Shared.Config.MovementConfig)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local MovementConfig = require(ReplicatedStorage.Shared.Config.MovementConfig)
+local PythonEliteConfig = require(ReplicatedStorage.Shared.Config.PythonEliteConfig)
 local MovementController = require(script.Parent.MovementController)
 
 local player = Players.LocalPlayer
@@ -17,14 +19,12 @@ local lastSpeed = 0
 local dashFlash = 0
 
 -- Recoil is stored as an offset and applied every render frame.
--- This makes the kick clearly visible instead of existing for only one frame.
 local recoilPitch = 0
 local recoilYaw = 0
 local recoilPitchVelocity = 0
 local recoilYawVelocity = 0
 
 function CameraController.AddRecoil(pitch, yaw)
-	-- Add an immediate, visible kick and a small random horizontal component.
 	recoilPitchVelocity += pitch
 	recoilYawVelocity += yaw
 end
@@ -103,19 +103,20 @@ function CameraController.Init()
 		end
 
 		-- Apply recoil after Roblox's camera update so it cannot be overwritten.
-		-- The kick remains visible for several frames and smoothly returns to zero.
 		if math.abs(recoilPitchVelocity) > 0.001 or math.abs(recoilYawVelocity) > 0.001 then
 			recoilPitch += recoilPitchVelocity
 			recoilYaw += recoilYawVelocity
-		recoilPitchVelocity = 0
-		recoilYawVelocity = 0
+			recoilPitchVelocity = 0
+			recoilYawVelocity = 0
 		end
 
-		local recovery = 1 - math.exp(-12 * deltaTime)
+		-- Recoil smoothly returns to the original aim direction.
+		local recovery = 1 - math.exp(-PythonEliteConfig.RecoilRecoverySpeed * deltaTime)
 		recoilPitch += (0 - recoilPitch) * recovery
 		recoilYaw += (0 - recoilYaw) * recovery
 
-		camera.CFrame *= CFrame.Angles(math.rad(-recoilPitch), math.rad(recoilYaw), 0)
+		-- Positive X rotation moves the camera upward for the desired gun kick.
+		camera.CFrame *= CFrame.Angles(math.rad(recoilPitch), math.rad(recoilYaw), 0)
 	end)
 end
 
