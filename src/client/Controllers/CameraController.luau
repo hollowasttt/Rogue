@@ -3,6 +3,7 @@ local RunService = game:GetService("RunService")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MovementConfig = require(ReplicatedStorage.Shared.Config.MovementConfig)
+local PythonEliteConfig = require(ReplicatedStorage.Shared.Config.PythonEliteConfig)
 local MovementController = require(script.Parent.MovementController)
 
 local player = Players.LocalPlayer
@@ -17,8 +18,6 @@ local dashKick = 0
 local lastSpeed = 0
 local dashFlash = 0
 
--- Recoil is a visual offset applied after Roblox's camera update.
--- It smoothly returns to zero and never modifies the player's actual aim.
 local recoilPitch = 0
 local recoilYaw = 0
 local recoilTargetPitch = 0
@@ -104,8 +103,7 @@ function CameraController.Init()
 			camera.CFrame *= CFrame.Angles(0, 0, roll)
 		end
 
-		-- Recoil target returns to zero independently of the camera's real aim.
-		local targetRecovery = 1 - math.exp(-MovementConfig.RecoilRecoverySpeed * deltaTime)
+		local targetRecovery = 1 - math.exp(-PythonEliteConfig.RecoilRecoverySpeed * deltaTime)
 		recoilTargetPitch += -recoilTargetPitch * targetRecovery
 		recoilTargetYaw += -recoilTargetYaw * targetRecovery
 
