@@ -50,27 +50,31 @@ local function dash()
 	canDash = false
 	isDashing = true
 	dashStartedAt = os.clock()
-	dashDirection = getMoveDirection()
 
-	local velocity = root.AssemblyLinearVelocity
-	local horizontal = flat(velocity)
-	local forwardSpeed = math.max(0, horizontal:Dot(dashDirection))
-	local dashSpeed = MovementConfig.DashSpeed + forwardSpeed * 0.15
-	local dashVelocity = dashDirection * dashSpeed
+	-- Dash follows the camera's full 3D look direction. Looking up/down lets
+	-- the player dash vertically instead of flattening the dash to the ground.
+	local camera = workspace.CurrentCamera
+	if camera then
+		dashDirection = camera.CFrame.LookVector.Unit
+	else
+		dashDirection = getMoveDirection()
+	end
 
-	root.AssemblyLinearVelocity = Vector3.new(dashVelocity.X, velocity.Y, dashVelocity.Z)
-	task.delay(MovementConfig.DashCooldown, function() canDash = true end)
+	root.AssemblyLinearVelocity = dashDirection * MovementConfig.DashSpeed
+
+	task.delay(MovementConfig.DashCooldown, function()
+		canDash = true
+	end)
 end
 
 local function startSlide()
-	if isSliding or isDashing or not root then return end
-	if humanoid.FloorMaterial == Enum.Material.Air then return end
+	if isSliding or not root or humanoid.FloorMaterial == Enum.Material.Air then return end
 
 	local horizontal = flat(root.AssemblyLinearVelocity)
 	local speed = horizontal.Magnitude
 
-	-- From rest, start with a small forward push. Once moving, preserve the
-	-- exact speed and direction the player had when Ctrl was pressed.
+	-- From rest, start slightly faster than walking. Otherwise preserve all
+	-- existing horizontal momentum, including momentum coming from a dash.
 	if speed < MovementConfig.SlideStartSpeed then
 		slideVelocity = getMoveDirection() * MovementConfig.SlideStartSpeed
 	else
@@ -85,7 +89,7 @@ end
 local function stopSlide()
 	if not isSliding then return end
 
-	-- Never erase momentum when Ctrl is released.
+	-- Preserve the final slide momentum when Ctrl is released.
 	if root then
 		local current = root.AssemblyLinearVelocity
 		root.AssemblyLinearVelocity = Vector3.new(slideVelocity.X, current.Y, slideVelocity.Z)
@@ -111,7 +115,7 @@ end
 function MovementController.Init()
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if processed then return end
-		if input.KeyCode == Enum.KeyCode.Q then
+		if input.KeyCode == Enum.KeyCode.LeftShift then
 			dash()
 		elseif input.KeyCode == Enum.KeyCode.LeftControl then
 			startSlide()
@@ -127,20 +131,12 @@ function MovementController.Init()
 	RunService.Heartbeat:Connect(function(deltaTime)
 		if not humanoid or not root or humanoid.Health <= 0 then return end
 
-		-- The dash has its own short movement lock so grounded Humanoid movement
-		-- cannot instantly cancel it.
 		if isDashing then
 			if os.clock() - dashStartedAt >= MovementConfig.DashDuration then
 				isDashing = false
 			else
-				local velocity = root.AssemblyLinearVelocity
-				local currentForward = flat(velocity):Dot(dashDirection)
-				local speed = math.max(MovementConfig.DashSpeed, currentForward)
-				root.AssemblyLinearVelocity = Vector3.new(
-					dashDirection.X * speed,
-					velocity.Y,
-					dashDirection.Z * speed
-				)
+				-- Keep the full 3D dash vector alive for the duration of the burst.
+				root.AssemblyLinearVelocity = dashDirection * MovementConfig.DashSpeed
 			end
 		end
 
@@ -151,9 +147,7 @@ function MovementController.Init()
 			return
 		end
 
-		-- Do NOT end the slide because FloorMaterial briefly reports Air on
-		-- slopes/edges. The slide is controlled by Ctrl, not by a timer or a
-		-- transient grounded-state change.
+		-- While sliding, Ctrl owns horizontal movement. WASD cannot cancel it.
 		local speed = slideVelocity.Magnitude
 		if speed > MovementConfig.SlideMinSpeed then
 			local newSpeed = math.max(
