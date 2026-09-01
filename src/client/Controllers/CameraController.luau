@@ -3,7 +3,6 @@ local RunService = game:GetService("RunService")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MovementConfig = require(ReplicatedStorage.Shared.Config.MovementConfig)
-local PythonEliteConfig = require(ReplicatedStorage.Shared.Config.PythonEliteConfig)
 local MovementController = require(script.Parent.MovementController)
 
 local player = Players.LocalPlayer
@@ -18,14 +17,16 @@ local dashKick = 0
 local lastSpeed = 0
 local dashFlash = 0
 
+-- Recoil is stored as a temporary camera rotation and ALWAYS decays back to zero.
 local recoilPitch = 0
 local recoilYaw = 0
-local recoilTargetPitch = 0
-local recoilTargetYaw = 0
+local recoilPitchVelocity = 0
+local recoilYawVelocity = 0
 
 function CameraController.AddRecoil(pitch, yaw)
-	recoilTargetPitch += pitch
-	recoilTargetYaw += yaw
+	-- Instant kick, followed by a damped return to the exact original aim.
+	recoilPitchVelocity += pitch * 55
+	recoilYawVelocity += yaw * 55
 end
 
 local function updateCharacter(character)
@@ -34,8 +35,8 @@ local function updateCharacter(character)
 	currentOffset = Vector3.zero
 	recoilPitch = 0
 	recoilYaw = 0
-	recoilTargetPitch = 0
-	recoilTargetYaw = 0
+	recoilPitchVelocity = 0
+	recoilYawVelocity = 0
 	humanoid.CameraOffset = currentOffset
 end
 
@@ -43,7 +44,6 @@ if player.Character then updateCharacter(player.Character) end
 player.CharacterAdded:Connect(updateCharacter)
 
 function CameraController.Init()
-	-- Run after Roblox's default camera update so recoil cannot be overwritten.
 	RunService:BindToRenderStep("RogueCameraController", Enum.RenderPriority.Last.Value, function(deltaTime)
 		local camera = workspace.CurrentCamera
 		if not camera or not humanoid or not root then return end
@@ -102,16 +102,31 @@ function CameraController.Init()
 			camera.CFrame *= CFrame.Angles(0, 0, roll)
 		end
 
-		-- Recoil target returns to zero. Current recoil follows it smoothly.
-		local targetRecovery = 1 - math.exp(-PythonEliteConfig.RecoilRecoverySpeed * deltaTime)
-		recoilTargetPitch += -recoilTargetPitch * targetRecovery
-		recoilTargetYaw += -recoilTargetYaw * targetRecovery
+		-- Apply recoil as a velocity impulse. The spring is critically damped,
+		-- so both pitch and yaw return all the way to exactly zero.
+		local stiffness = 170
+		local damping = 25
 
-		local follow = 1 - math.exp(-32 * deltaTime)
-		recoilPitch += (recoilTargetPitch - recoilPitch) * follow
-		recoilYaw += (recoilTargetYaw - recoilYaw) * follow
+		recoilPitchVelocity += -recoilPitch * stiffness * deltaTime
+		recoilYawVelocity += -recoilYaw * stiffness * deltaTime
 
-		-- This is the final camera transform for this frame.
+		local dampingFactor = math.exp(-damping * deltaTime)
+		recoilPitchVelocity *= dampingFactor
+		recoilYawVelocity *= dampingFactor
+
+		recoilPitch += recoilPitchVelocity * deltaTime
+		recoilYaw += recoilYawVelocity * deltaTime
+
+		-- Prevent tiny floating-point remnants from keeping the camera offset.
+		if math.abs(recoilPitch) < 0.001 and math.abs(recoilPitchVelocity) < 0.01 then
+			recoilPitch = 0
+			recoilPitchVelocity = 0
+		end
+		if math.abs(recoilYaw) < 0.001 and math.abs(recoilYawVelocity) < 0.01 then
+			recoilYaw = 0
+			recoilYawVelocity = 0
+		end
+
 		camera.CFrame *= CFrame.Angles(math.rad(recoilPitch), math.rad(recoilYaw), 0)
 	end)
 end
