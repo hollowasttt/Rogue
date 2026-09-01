@@ -10,12 +10,15 @@ return {
 	DashCooldown = 0.35,
 	DashAirControl = 0.35,
 
-	SlideDuration = 1.2,
-	MinSpeedToSlide = 8,
+	-- Sliding always has enough momentum to move, even when started from rest.
+	-- Fast entries keep their speed and gradually decay toward SlideMinSpeed.
+	SlideDuration = 999999,
+	MinSpeedToSlide = 0,
 	SlideFriction = 0.65,
-	SlideMinSpeed = 3,
+	SlideMinSpeed = 24,
+	SlideStartSpeed = 24,
 	SlideJumpBoost = 1.12,
-	SlideCameraOffset = Vector3.new(0, -1.5, 0),
+	SlideCameraOffset = Vector3.new(0, -1.8, 0),
 	SlideCameraSmoothness = 12,
 
 	JumpPower = 50,
