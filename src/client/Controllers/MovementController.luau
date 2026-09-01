@@ -111,29 +111,26 @@ function MovementController.Init()
 
 		local grounded = humanoid.FloorMaterial ~= Enum.Material.Air
 
-		-- Preserve horizontal air momentum instead of allowing Humanoid WalkSpeed
-		-- to bleed it down while airborne. Input can steer, but does not reset speed.
+		-- Keep air momentum independent from Humanoid.WalkSpeed. WalkSpeed is only
+		-- used for normal ground movement; it must never bleed off a faster jump.
 		if not grounded and not isSliding and not isDashing then
 			local horizontal = flat(root.AssemblyLinearVelocity)
 			if horizontal.Magnitude > MovementConfig.WalkSpeed then
 				airMomentum = horizontal
-			else
-				airMomentum = Vector3.zero
 			end
 
-			if airMomentum.Magnitude > 0 then
+			if airMomentum.Magnitude > MovementConfig.WalkSpeed then
 				local inputDirection = flat(humanoid.MoveDirection)
 				if inputDirection.Magnitude > 0.1 then
+					local airControl = MovementConfig.AirControl or 0.35
 					local steer = inputDirection.Unit * airMomentum.Magnitude
-					airMomentum = airMomentum:Lerp(steer, math.clamp(MovementConfig.AirControl * deltaTime, 0, 1))
+					airMomentum = airMomentum:Lerp(steer, math.clamp(airControl * deltaTime, 0, 1))
 				end
 				local velocity = root.AssemblyLinearVelocity
 				root.AssemblyLinearVelocity = Vector3.new(airMomentum.X, velocity.Y, airMomentum.Z)
 			end
-		else
-			if grounded and not isSliding and not isDashing then
-				airMomentum = Vector3.zero
-			end
+		elseif grounded and not isSliding and not isDashing then
+			airMomentum = Vector3.zero
 		end
 
 		if isDashing then
@@ -144,7 +141,7 @@ function MovementController.Init()
 			end
 		end
 
-		-- Ctrl pressed in the air is buffered and automatically becomes a slide on landing.
+		-- Holding Ctrl in the air buffers the slide until the exact landing frame.
 		if slideQueued and not isSliding and grounded then
 			startSlide()
 		end
