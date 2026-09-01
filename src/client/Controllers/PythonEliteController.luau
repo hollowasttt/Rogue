@@ -40,22 +40,32 @@ local function getTool()
 end
 
 local function fire()
-	if not equippedTool then return end
+	print("[PythonElite] FIRE EVENT RECEIVED")
+
+	if not equippedTool then
+		warn("[PythonElite] Fire called but no equippedTool")
+		return
+	end
 	if os.clock() - lastShot < Config.FireRate then return end
 
 	lastShot = os.clock()
 
 	local camera = workspace.CurrentCamera
-	if not camera then return end
+	if not camera then
+		warn("[PythonElite] CurrentCamera yok")
+		return
+	end
 
-	-- Strong kick is handled by the shared camera controller.
 	local yaw = (math.random() * 2 - 1) * Config.RecoilYaw
+	print("[PythonElite] ADDING RECOIL", Config.RecoilPitch, yaw)
 	CameraController.AddRecoil(Config.RecoilPitch, yaw)
 
 	local remote = ReplicatedStorage:FindFirstChild("WeaponRemotes")
 	remote = remote and remote:FindFirstChild("FireWeapon")
 	if remote then
 		remote:FireServer(camera.CFrame.Position, camera.CFrame.LookVector)
+	else
+		warn("[PythonElite] FireWeapon remote bulunamadı")
 	end
 end
 
@@ -63,13 +73,16 @@ local function bindTool(tool)
 	if equippedTool == tool then return end
 	disconnectAll()
 	equippedTool = tool
+	print("[PythonElite] TOOL BOUND", tool:GetFullName())
 
 	table.insert(connections, tool.Activated:Connect(fire))
 	table.insert(connections, tool.Equipped:Connect(function()
 		equippedTool = tool
+		print("[PythonElite] EQUIPPED", tool:GetFullName())
 	end))
 	table.insert(connections, tool.Unequipped:Connect(function()
 		equippedTool = nil
+		print("[PythonElite] UNEQUIPPED")
 	end))
 end
 
@@ -77,10 +90,14 @@ local function scan()
 	local tool = getTool()
 	if tool then
 		bindTool(tool)
+	else
+		print("[PythonElite] TOOL NOT FOUND")
 	end
 end
 
 function Controller.Init()
+	print("[PythonElite] INIT")
+
 	player.CharacterAdded:Connect(function()
 		disconnectAll()
 		task.defer(scan)
