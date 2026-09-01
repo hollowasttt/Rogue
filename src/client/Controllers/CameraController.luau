@@ -106,7 +106,8 @@ function CameraController.Init()
 		end
 
 		-- Move the visual recoil target back to zero.
-		local recovery = 1 - math.exp(-18 * deltaTime)
+		-- Lower value = slower recoil recovery.
+		local recovery = 1 - math.exp(-10 * deltaTime)
 		recoilTargetPitch += -recoilTargetPitch * recovery
 		recoilTargetYaw += -recoilTargetYaw * recovery
 
