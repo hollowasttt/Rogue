@@ -1,6 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 
 local Config = require(ReplicatedStorage.Shared.Config.PythonEliteConfig)
 local player = Players.LocalPlayer
@@ -8,10 +8,11 @@ local Controller = {}
 
 local equippedTool
 local connections = {}
-local ammo = Config.MagazineSize
-local reserve = Config.ReserveAmmo
 local lastShot = 0
-local reloading = false
+
+local recoilPitch = 0
+local recoilYaw = 0
+local recoilConnection
 
 local function disconnectAll()
 	for _, connection in connections do
@@ -43,34 +44,23 @@ local function getTool()
 end
 
 local function fire()
-	if not equippedTool or reloading then return end
+	if not equippedTool then return end
 	if os.clock() - lastShot < Config.FireRate then return end
-	if ammo <= 0 then return end
 
 	lastShot = os.clock()
-	ammo -= 1
 
 	local camera = workspace.CurrentCamera
 	if not camera then return end
+
+	-- Add a small camera kick. The render-step below applies it after the normal camera update.
+	recoilPitch += Config.RecoilPitch
+	recoilYaw += (math.random() * 2 - 1) * Config.RecoilYaw
 
 	local remote = ReplicatedStorage:FindFirstChild("WeaponRemotes")
 	remote = remote and remote:FindFirstChild("FireWeapon")
 	if remote then
 		remote:FireServer(camera.CFrame.Position, camera.CFrame.LookVector)
 	end
-end
-
-local function reload()
-	if reloading or ammo >= Config.MagazineSize or reserve <= 0 then return end
-	reloading = true
-	task.delay(Config.ReloadTime, function()
-		if not reloading then return end
-		local needed = Config.MagazineSize - ammo
-		local loaded = math.min(needed, reserve)
-		ammo += loaded
-		reserve -= loaded
-		reloading = false
-	end)
 end
 
 local function bindTool(tool)
@@ -95,18 +85,28 @@ local function scan()
 end
 
 function Controller.Init()
-	ammo = Config.MagazineSize
-	reserve = Config.ReserveAmmo
+	if not recoilConnection then
+		recoilConnection = RunService:BindToRenderStep("PythonEliteRecoil", Enum.RenderPriority.Camera.Value + 1, function(deltaTime)
+			local camera = workspace.CurrentCamera
+			if not camera then return end
 
-	UserInputService.InputBegan:Connect(function(input, processed)
-		if processed then return end
-		if input.KeyCode == Enum.KeyCode.R then
-			reload()
-		end
-	end)
+			local recovery = 1 - math.exp(-Config.RecoilRecoverySpeed * deltaTime)
+			local appliedPitch = recoilPitch * recovery
+			local appliedYaw = recoilYaw * recovery
+
+			recoilPitch -= appliedPitch
+			recoilYaw -= appliedYaw
+
+			if math.abs(appliedPitch) > 0.001 or math.abs(appliedYaw) > 0.001 then
+				camera.CFrame *= CFrame.Angles(math.rad(-appliedPitch), math.rad(appliedYaw), 0)
+			end
+		end)
+	end
 
 	player.CharacterAdded:Connect(function()
 		disconnectAll()
+		recoilPitch = 0
+		recoilYaw = 0
 		task.defer(scan)
 	end)
 
