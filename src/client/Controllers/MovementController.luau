@@ -64,9 +64,6 @@ local function dash()
 	local velocity = root.AssemblyLinearVelocity
 	local horizontal = flat(velocity)
 	local forwardSpeed = math.max(0, horizontal:Dot(dashDirection))
-
-	-- Dash is a burst on top of the player's existing movement.
-	-- Never apply ground friction or reset the player's momentum during it.
 	local dashSpeed = MovementConfig.DashSpeed + forwardSpeed * 0.15
 	local dashVelocity = dashDirection * dashSpeed
 
@@ -83,13 +80,9 @@ local function startSlide()
 
 	local horizontal = flat(root.AssemblyLinearVelocity)
 	local speed = horizontal.Magnitude
+	if speed < MovementConfig.MinSpeedToSlide then return end
 
-	if speed < MovementConfig.MinSpeedToSlide then
-		return
-	end
-
-	-- Capture the exact speed and direction at the instant the slide starts.
-	-- We do not snap it to a fixed SlideSpeed.
+	-- Preserve exactly the momentum we had when entering the slide.
 	slideVelocity = horizontal
 	isSliding = true
 	slideStartedAt = os.clock()
@@ -99,7 +92,6 @@ end
 
 local function stopSlide()
 	if not isSliding then return end
-
 	isSliding = false
 	slideVelocity = Vector3.zero
 	humanoid.WalkSpeed = MovementConfig.WalkSpeed
@@ -113,6 +105,10 @@ local function slideJump()
 	stopSlide()
 	humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 	root.AssemblyLinearVelocity = Vector3.new(velocity.X, MovementConfig.JumpPower, velocity.Z)
+end
+
+function MovementController.IsSliding()
+	return isSliding
 end
 
 function MovementController.Init()
@@ -137,8 +133,8 @@ function MovementController.Init()
 	RunService.Heartbeat:Connect(function(deltaTime)
 		if not humanoid or not root or humanoid.Health <= 0 then return end
 
-		-- Lock the dash direction/speed briefly so the Humanoid controller cannot
-		-- instantly kill the burst when the player's feet are touching the ground.
+		-- During dash, continuously restore the burst velocity. This prevents
+		-- the grounded Humanoid controller from immediately braking the player.
 		if isDashing then
 			if os.clock() - dashStartedAt >= MovementConfig.DashDuration then
 				isDashing = false
@@ -171,8 +167,8 @@ function MovementController.Init()
 			return
 		end
 
-		-- Smoothly bleed off the captured slide momentum. There is no sudden
-		-- speed reset: fast entry means a fast slide, then gradual deceleration.
+		-- Slide is independent of WASD. Releasing W cannot kill momentum.
+		-- Friction slowly reduces the captured velocity over time.
 		local friction = math.max(0, 1 - MovementConfig.SlideFriction * deltaTime)
 		slideVelocity *= friction
 
