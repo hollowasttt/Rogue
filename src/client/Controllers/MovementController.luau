@@ -69,7 +69,8 @@ local function startSlide()
 	local horizontal = flat(root.AssemblyLinearVelocity)
 	local speed = horizontal.Magnitude
 
-	-- Even from a standstill, Ctrl starts a forward slide slightly faster than walking.
+	-- From rest, start with a small forward push. Once moving, preserve the
+	-- exact speed and direction the player had when Ctrl was pressed.
 	if speed < MovementConfig.SlideStartSpeed then
 		slideVelocity = getMoveDirection() * MovementConfig.SlideStartSpeed
 	else
@@ -84,8 +85,7 @@ end
 local function stopSlide()
 	if not isSliding then return end
 
-	-- Leaving slide must not kill the momentum. The current slide velocity is
-	-- transferred back to the character before the slide state is cleared.
+	-- Never erase momentum when Ctrl is released.
 	if root then
 		local current = root.AssemblyLinearVelocity
 		root.AssemblyLinearVelocity = Vector3.new(slideVelocity.X, current.Y, slideVelocity.Z)
@@ -98,7 +98,6 @@ end
 
 local function slideJump()
 	if not isSliding or not root then return end
-
 	local velocity = slideVelocity * MovementConfig.SlideJumpBoost
 	stopSlide()
 	humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
@@ -122,14 +121,14 @@ function MovementController.Init()
 	end)
 
 	UserInputService.InputEnded:Connect(function(input)
-		if input.KeyCode == Enum.KeyCode.LeftControl then
-			stopSlide()
-		end
+		if input.KeyCode == Enum.KeyCode.LeftControl then stopSlide() end
 	end)
 
 	RunService.Heartbeat:Connect(function(deltaTime)
 		if not humanoid or not root or humanoid.Health <= 0 then return end
 
+		-- The dash has its own short movement lock so grounded Humanoid movement
+		-- cannot instantly cancel it.
 		if isDashing then
 			if os.clock() - dashStartedAt >= MovementConfig.DashDuration then
 				isDashing = false
@@ -152,13 +151,9 @@ function MovementController.Init()
 			return
 		end
 
-		if humanoid.FloorMaterial == Enum.Material.Air then
-			stopSlide()
-			return
-		end
-
-		-- Slide has no forced time limit. It keeps moving while Ctrl is held.
-		-- Momentum decays toward a small rolling speed instead of reaching zero.
+		-- Do NOT end the slide because FloorMaterial briefly reports Air on
+		-- slopes/edges. The slide is controlled by Ctrl, not by a timer or a
+		-- transient grounded-state change.
 		local speed = slideVelocity.Magnitude
 		if speed > MovementConfig.SlideMinSpeed then
 			local newSpeed = math.max(
