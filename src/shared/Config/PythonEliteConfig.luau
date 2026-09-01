@@ -1,5 +1,5 @@
 return {
-	ToolName = "Python elite",
+	ToolName = "PythonElite",
 
 	FireRate = 0.15,
 
