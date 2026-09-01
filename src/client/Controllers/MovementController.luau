@@ -9,9 +9,12 @@ local player = Players.LocalPlayer
 local MovementController = {}
 
 local canDash = true
+local canSlide = true
 local isSliding = false
 local isDashing = false
+local dashStartedAt = 0
 local slideStartedAt = 0
+local dashDirection = Vector3.zero
 
 local character, humanoid, root
 
@@ -22,6 +25,7 @@ local function updateCharacter(char)
 	isSliding = false
 	isDashing = false
 	canDash = true
+	canSlide = true
 	humanoid.WalkSpeed = MovementConfig.WalkSpeed
 	humanoid.JumpPower = MovementConfig.JumpPower
 end
@@ -36,9 +40,9 @@ local function flat(vector)
 end
 
 local function getMoveDirection()
-	local dir = humanoid.MoveDirection
+	local dir = flat(humanoid.MoveDirection)
 	if dir.Magnitude >= 0.1 then
-		return flat(dir).Unit
+		return dir.Unit
 	end
 
 	local look = flat(root.CFrame.LookVector)
@@ -53,16 +57,17 @@ local function dash()
 
 	canDash = false
 	isDashing = true
+	dashStartedAt = os.clock()
+	dashDirection = getMoveDirection()
 
-	local direction = getMoveDirection()
 	local velocity = root.AssemblyLinearVelocity
 	local horizontal = flat(velocity)
 
-	-- Add a strong burst instead of replacing momentum. This keeps the dash fast and fluid.
-	local dashVelocity = direction * MovementConfig.DashSpeed
-	if horizontal:Dot(direction) > MovementConfig.DashSpeed then
-		dashVelocity += horizontal * 0.35
-	end
+	-- Add the dash to existing momentum instead of replacing it.
+	-- This prevents a normal run from feeling like it suddenly hits a wall.
+	local forwardSpeed = math.max(0, horizontal:Dot(dashDirection))
+	local targetSpeed = MovementConfig.DashSpeed + forwardSpeed * 0.15
+	local dashVelocity = dashDirection * targetSpeed
 
 	root.AssemblyLinearVelocity = Vector3.new(
 		dashVelocity.X,
@@ -80,15 +85,33 @@ local function dash()
 end
 
 local function startSlide()
-	if isSliding or isDashing or not root or humanoid.FloorMaterial == Enum.Material.Air then return end
+	if not canSlide or isSliding or isDashing or not root then return end
+	if humanoid.FloorMaterial == Enum.Material.Air then return end
 
+	local direction = getMoveDirection()
 	local horizontal = flat(root.AssemblyLinearVelocity)
-	if horizontal.Magnitude < MovementConfig.MinSpeedToSlide then return end
+	local speed = horizontal.Magnitude
+
+	-- Walking should be enough to start a slide; don't require a sprint system yet.
+	if speed < MovementConfig.MinSpeedToSlide then
+		speed = MovementConfig.WalkSpeed
+	end
 
 	isSliding = true
+	canSlide = false
 	slideStartedAt = os.clock()
 	humanoid.WalkSpeed = 0
-	humanoid.JumpPower = 0
+
+	local slideSpeed = math.max(speed, MovementConfig.SlideSpeed)
+	root.AssemblyLinearVelocity = Vector3.new(
+		direction.X * slideSpeed,
+		root.AssemblyLinearVelocity.Y,
+		direction.Z * slideSpeed
+	)
+
+	task.delay(MovementConfig.SlideCooldown, function()
+		canSlide = true
+	end)
 end
 
 local function stopSlide()
@@ -103,10 +126,7 @@ local function slideJump()
 	if not isSliding or not root then return end
 
 	local velocity = root.AssemblyLinearVelocity
-	local horizontal = flat(velocity)
-	if horizontal.Magnitude > 0 then
-		horizontal *= MovementConfig.SlideJumpBoost
-	end
+	local horizontal = flat(velocity) * MovementConfig.SlideJumpBoost
 
 	stopSlide()
 	humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
@@ -134,6 +154,20 @@ function MovementController.Init()
 
 	RunService.Heartbeat:Connect(function(deltaTime)
 		if not humanoid or not root or humanoid.Health <= 0 then return end
+
+		-- Keep the dash velocity alive for its short duration. Roblox's Humanoid
+		-- controller can otherwise overwrite AssemblyLinearVelocity immediately.
+		if isDashing then
+			if os.clock() - dashStartedAt >= MovementConfig.DashDuration then
+				isDashing = false
+			else
+				local velocity = root.AssemblyLinearVelocity
+				local current = flat(velocity)
+				local speed = math.max(MovementConfig.DashSpeed, current:Dot(dashDirection))
+				local target = dashDirection * speed
+				root.AssemblyLinearVelocity = Vector3.new(target.X, velocity.Y, target.Z)
+			end
+		end
 
 		if not isSliding then
 			if humanoid.WalkSpeed ~= MovementConfig.WalkSpeed then
