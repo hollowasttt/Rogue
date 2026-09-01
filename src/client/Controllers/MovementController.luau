@@ -111,11 +111,10 @@ function MovementController.Init()
 
 		local grounded = humanoid.FloorMaterial ~= Enum.Material.Air
 
-		-- Keep air momentum independent from Humanoid.WalkSpeed. WalkSpeed is only
-		-- used for normal ground movement; it must never bleed off a faster jump.
+		-- Momentum is never capped at WalkSpeed. WalkSpeed only controls normal input.
 		if not grounded and not isSliding and not isDashing then
 			local horizontal = flat(root.AssemblyLinearVelocity)
-			if horizontal.Magnitude > MovementConfig.WalkSpeed then
+			if horizontal.Magnitude > airMomentum.Magnitude then
 				airMomentum = horizontal
 			end
 
@@ -130,18 +129,22 @@ function MovementController.Init()
 				root.AssemblyLinearVelocity = Vector3.new(airMomentum.X, velocity.Y, airMomentum.Z)
 			end
 		elseif grounded and not isSliding and not isDashing then
-			airMomentum = Vector3.zero
+			local horizontal = flat(root.AssemblyLinearVelocity)
+			if horizontal.Magnitude > MovementConfig.WalkSpeed then
+				airMomentum = horizontal
+			end
 		end
 
 		if isDashing then
 			if os.clock() - dashStartedAt >= MovementConfig.DashDuration then
 				isDashing = false
+				-- Preserve whatever speed the dash ended with. There is no speed cap.
+				airMomentum = flat(root.AssemblyLinearVelocity)
 			else
 				root.AssemblyLinearVelocity = dashDirection * MovementConfig.DashSpeed
 			end
 		end
 
-		-- Holding Ctrl in the air buffers the slide until the exact landing frame.
 		if slideQueued and not isSliding and grounded then
 			startSlide()
 		end
