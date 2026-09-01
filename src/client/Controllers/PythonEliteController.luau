@@ -1,18 +1,14 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
 local Config = require(ReplicatedStorage.Shared.Config.PythonEliteConfig)
+local CameraController = require(script.Parent.CameraController)
 local player = Players.LocalPlayer
 local Controller = {}
 
 local equippedTool
 local connections = {}
 local lastShot = 0
-
-local recoilPitch = 0
-local recoilYaw = 0
-local recoilConnection
 
 local function disconnectAll()
 	for _, connection in connections do
@@ -52,9 +48,9 @@ local function fire()
 	local camera = workspace.CurrentCamera
 	if not camera then return end
 
-	-- Add a small camera kick. The render-step below applies it after the normal camera update.
-	recoilPitch += Config.RecoilPitch
-	recoilYaw += (math.random() * 2 - 1) * Config.RecoilYaw
+	-- Strong kick is handled by the shared camera controller.
+	local yaw = (math.random() * 2 - 1) * Config.RecoilYaw
+	CameraController.AddRecoil(Config.RecoilPitch, yaw)
 
 	local remote = ReplicatedStorage:FindFirstChild("WeaponRemotes")
 	remote = remote and remote:FindFirstChild("FireWeapon")
@@ -85,28 +81,8 @@ local function scan()
 end
 
 function Controller.Init()
-	if not recoilConnection then
-		recoilConnection = RunService:BindToRenderStep("PythonEliteRecoil", Enum.RenderPriority.Camera.Value + 1, function(deltaTime)
-			local camera = workspace.CurrentCamera
-			if not camera then return end
-
-			local recovery = 1 - math.exp(-Config.RecoilRecoverySpeed * deltaTime)
-			local appliedPitch = recoilPitch * recovery
-			local appliedYaw = recoilYaw * recovery
-
-			recoilPitch -= appliedPitch
-			recoilYaw -= appliedYaw
-
-			if math.abs(appliedPitch) > 0.001 or math.abs(appliedYaw) > 0.001 then
-				camera.CFrame *= CFrame.Angles(math.rad(-appliedPitch), math.rad(appliedYaw), 0)
-			end
-		end)
-	end
-
 	player.CharacterAdded:Connect(function()
 		disconnectAll()
-		recoilPitch = 0
-		recoilYaw = 0
 		task.defer(scan)
 	end)
 
